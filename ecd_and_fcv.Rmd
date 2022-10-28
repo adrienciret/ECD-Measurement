@@ -1,0 +1,403 @@
+---
+title: 'Measuring the Early Childhood Development in FCV settings'
+author: "Adrien Ciret"
+date: "`r Sys.Date()`"
+output: 
+  powerpoint_presentation:
+    reference_doc: GEPD_presentation_template.pptx
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	fig.width = 9, fig.height = 6, fig.path = "plots/", dev = c("png"), dpi=500
+)
+#libraries
+library(tidyverse)
+library(foreign)
+library(here)
+library(vtable)
+library(flextable)
+library(ggthemes)
+library(Hmisc)
+library(httr)
+library(patchwork)
+library(ggrepel)
+library(lubridate)
+library(haven)
+library(zoo)
+library(readxl)
+library(ggbeeswarm)
+library(estimatr)
+library(ggpmisc)
+library(ggthemes)
+library(ggtext)
+library(gtsummary)
+library(geosphere)
+library(fixest)
+library(modelsummary)
+options(modelsummary_factory_word = 'flextable')
+custom_theme <- function(x, ...) {
+    x %>% set_table_properties(layout = "autofit")
+}
+options("modelsummary_theme_flextable" = custom_theme)
+
+library(factoextra)
+library(skimr)
+#directories
+
+
+  if (str_to_lower(Sys.info()["user"]) == "wb469649") {
+      
+    dir <- here()
+    shared_loc <- 'C:/Users/wb469649/WBG/Ezequiel Molina - Dashboard (Team Folder)/Main_Documents/GEPD_FCDO_report/'
+    
+  } else if (str_to_lower(Sys.info()["user"]) == "wb577189") {
+
+    dir <- "C:/Users/wb577189/OneDrive - WBG/Documents/GitHub/GEPD"
+    shared_loc <- 'C:/Users/wb577189/OneDrive - WBG/My files/Dashboard (Team Folder)/Main_Documents/GEPD_FCDO_report/'
+  }
+
+indicators_dir <- paste(dir, 'Indicators', sep="/")
+out_dir <- paste(dir, 'Output', sep="/")
+
+#path to confidential directory
+
+  if (str_to_lower(Sys.info()["user"]) == "wb469649") {
+    #directories
+    confidential_dir<- "C:/Users/wb469649/WBG/HEDGE Files - HEDGE Documents/GEPD-Confidential/"
+    anonymized_dir <- "C:/Users/wb469649/WBG/HEDGE Files - HEDGE Documents/GEPD/"
+
+  } else if (str_to_lower(Sys.info()["user"]) == "wb577189") {
+    #directories
+    confidential_dir<- "C:/Users/wb577189/OneDrive - WBG/GEPD-Confidential/"
+    anonymized_dir <- "C:/Users/wb577189/OneDrive - WBG/GEPD/"
+
+  }
+
+
+
+# change_here <- function(new_path){
+#   new_root <- here:::.root_env
+#   
+#   new_root$f <- function(...){file.path(new_path, ...)}
+#   
+#   assignInNamespace(".root_env", new_root, ns = "here")
+# }
+
+#list countries
+countries <- c("PER", "JOR", "RWA", "MDG", "ETH")
+
+```
+
+```{r functions}
+#functions
+FitFlextableToPage <- function(ft, pgwidth = 5){
+
+  ft_out <- ft %>% autofit()
+
+  ft_out <- width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable_dim(ft_out)$widths))
+  return(ft_out)
+}
+
+#add equations to plots
+eq_plot_txt <- function(y,x,data) {
+  
+  f <- as.formula(paste(y,x, sep="~"))
+  
+  eq <- lm_robust(f, data=data, se_type='HC2')
+  coef <- coef(eq)
+  std_err <- sqrt(diag(vcov(eq)))
+  r_2<- summary(eq)$r.squared
+  glue::glue("y = {round(coef[1],3)} + {round(coef[2],3)} x, R<sup>2</sup> = {round(r_2[1],3)} <br> &nbsp;   &nbsp;  	&nbsp; 	&nbsp;   ({round(std_err[1],3)}) &nbsp;   &nbsp;  ({round(std_err[2],3)})" )
+}
+
+#modelsummary output
+gm <- tibble::tribble(
+  ~raw,        ~clean,          ~fmt,
+  "nobs",      "N",             0,
+  "r.squared", "R Sq.", 2)
+
+#Create function to save metadata for each question in each module
+makeVlist <- function(dta) { 
+  varlabels <- sapply(dta, function(x) attr(x,"label"))
+  vallabels <- sapply(dta, function(x) attr(x,"labels"))
+  tibble(name = names(varlabels),
+         varlabel = varlabels, vallabel = vallabels) 
+}
+```
+
+
+```{r codebook and data}
+dir <- here()
+### Codebook
+codebook <- readxl::read_xlsx("C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/Survey and CAPI/COVID-19 ECD CGR SURVEY codebook_v2.xlsx") %>% filter(!is.na(`Variable name`))
+
+dir <- "C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/"
+## Mexico
+
+mex <- read_dta(paste(dir, "Mexico/528_base_primera infancia_vf160920.dta", sep = "/"))
+
+
+## Sri Lanka
+sri_officers <- read_sav(paste(dir, "Sri Lanka/Telephone survey data set and code sheet/WB Officers' Database.sav", sep = "/"))
+
+sri_parents <- read_sav(paste(dir, "Sri Lanka/Telephone survey data set and code sheet/WB Parents Data Base.sav", sep = "/"))
+
+sri_teachers<- read_sav(paste(dir, "Sri Lanka/Telephone survey data set and code sheet/WB Teachers' Database.sav", sep = "/"))
+
+## Kenya
+ken_files <- list.files(path = "C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/Kenya/", pattern = ".dta", full.names = TRUE)
+ken_names <- list.files(path = "C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/Kenya/", pattern = ".dta")
+
+
+for (i in 1:length(ken_files)) assign(ken_names[i], read_dta(ken_files[i]))
+
+
+## Pakistan
+pak_files <- list.files(path = "C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/Pakistan/", pattern = ".dta", full.names = TRUE)
+pak_names <- list.files(path = "C:/Users/wb577189/OneDrive - WBG/Desktop/Education GP/06. FCV/02. Analysis/Pakistan/", pattern = ".dta")
+
+
+for (i in 1:length(pak_files)) assign(pak_names[i], read_dta(pak_files[i]))
+
+##Rename pakistan files
+files <- ls(all.names=T,envir=globalenv(),pattern='Sec|Title')
+
+for (n in files) { 
+  n2 <- gsub('Sec|Title','Pak',n); 
+  assign(n2,get(n)); 
+  rm(list=n); 
+  
+}
+
+pak_all <- Pak.dta %>% 
+  left_join(Pak1.dta) %>% 
+  left_join(Pak2.dta) %>% 
+  left_join(Pak3.dta) %>% 
+  left_join(Pak4.dta)
+
+rm(list = ls()[grep("^Pak", ls())])
+
+## North Macedonia
+
+north_mac <- read_sav(paste(dir, "North Macedonia/Data_Temp_WB_covid19_112020_final_send.sav", sep = "/"))
+
+
+```
+
+```{r}
+
+codebook_pak<- makeVlist(pak_all)
+
+codebook_mex<- makeVlist(mex)
+
+
+codebook_sri_o<- makeVlist(sri_officers)
+codebook_sri_p<- makeVlist(sri_parents)
+codebook_sri_t<- makeVlist(sri_teachers)
+
+codebook_mac<- makeVlist(north_mac)
+
+```
+
+
+## Correlation plots - Pakistan
+
+```{r corr}
+### Correlation matrix
+
+items_list <- pak_all %>% 
+  select(where(is.numeric)) %>% names()
+
+#functions
+FitFlextableToPage <- function(ft, pgwidth = 5){
+  
+  ft_out <- ft %>% autofit()
+  
+  ft_out <- width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable_dim(ft_out)$widths))
+  return(ft_out)
+}
+
+
+#create a function for correlation plots
+cor_fun <- function(items) {
+  
+  
+  cor_df <- pak_all %>% 
+    select(items) %>%
+    mutate(across(everything(), ~ as.numeric(.))) #%>% 
+    # group_by(language_group) %>%
+    # mutate(across(items,~if_else(is.na(.),mean(.,na.rm=T),.))) %>%#impute with mean by language group
+    # ungroup() %>%
+    # select(names(items))
+  
+  res <- rcorr(as.matrix(cor_df)) 
+  
+  pval <- res$P
+  res <- res$r
+  
+  ## trunctuate the correlation matrix to two decimal
+  res <- format(round(cbind(rep(-1.11, ncol(as.matrix(cor_df))), res), 3))[,-1]
+  
+  mystars <- ifelse(pval < .001, "***", ifelse(pval < .01, "** ", ifelse(pval < .05, "*  ", ifelse(pval < .1, "+   ", "    "))))
+  res <- matrix(paste(res, mystars, sep=""), ncol=ncol(as.matrix(cor_df)))
+  
+  res[upper.tri(res)] <- NA # erase the upper triangle
+  diag(res) <- NA     
+  
+  
+  res <- res %>%
+    as_tibble() 
+  
+  colnames(res) <- items
+  
+  res$var <- items
+  
+  
+  
+  
+  ovr_table <- res %>% 
+    select(var, everything()) %>%
+    flextable() %>%
+    bg(j = 2:ncol(res), 
+       bg = function(x){
+         out <- rep("transparent", length(x))
+         out[as.numeric(str_sub(x,1,4)) < 0] <- "#e76f51"
+         out[as.numeric(str_sub(x,1,4)) >= 0 & as.numeric(str_sub(x,1,4)) < 0.2] <- "#f4a261"
+         out[as.numeric(str_sub(x,1,4)) >= 0.2 & as.numeric(str_sub(x,1,4)) < 0.4] <- "#e9c46a"
+         out[as.numeric(str_sub(x,1,4)) >= 0.4 & as.numeric(str_sub(x,1,4)) < 0.6] <- "#2a9d8f"
+         out[as.numeric(str_sub(x,1,4)) >= 0.6 ] <- "#264653"
+         out
+       })
+  
+  FitFlextableToPage(ovr_table) %>%
+    add_footer_lines("*** significant at 0.1% level. 
+                   ** significant at 1% level. 
+                   * significant at 5% level.  
+                   + significant at 10% level.  ") %>%
+    set_table_properties(layout = "autofit")
+  
+  
+}
+
+
+cor_fun(items_list)
+```
+## Correlation plots - all countries
+
+```{r corr, include=FALSE}
+### Correlation matrix
+
+country <- c("north_mac", "pak_all", "mex", "sri_parents")
+
+for(ccode in country){
+  
+## 1- call in data
+  
+  if (ccode == "north_mac") {
+    
+  data <- north_mac
+
+  }else if (ccode == "pak_all") {
+    
+  data <- pak_all
+  
+  }else if (ccode == "mex") {
+    
+  data <- mex
+  
+  }else if (ccode == "sri_parents") {
+    
+  data <- sri_parents
+  
+  }
+
+  
+
+  ## 2 - Create variable lists
+  
+  items_list <- data %>% 
+  select(where(is.numeric)) %>% names()
+  
+
+#functions
+FitFlextableToPage <- function(ft, pgwidth = 5){
+  
+  ft_out <- ft %>% autofit()
+  
+  ft_out <- width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable_dim(ft_out)$widths))
+  return(ft_out)
+}
+
+
+#create a function for correlation plots
+cor_fun <- function(items) {
+  
+  
+  cor_df <- data %>% 
+    select(items) %>%
+    mutate(across(everything(), ~ as.numeric(.))) 
+  
+  res <- rcorr(as.matrix(cor_df)) 
+  
+  pval <- res$P
+  res <- res$r
+  
+  ## trunctuate the correlation matrix to two decimal
+  res <- format(round(cbind(rep(-1.11, ncol(as.matrix(cor_df))), res), 3))[,-1]
+  
+  mystars <- ifelse(pval < .001, "***", ifelse(pval < .01, "** ", ifelse(pval < .05, "*  ", ifelse(pval < .1, "+   ", "    "))))
+  res <- matrix(paste(res, mystars, sep=""), ncol=ncol(as.matrix(cor_df)))
+  
+  res[upper.tri(res)] <- NA # erase the upper triangle
+  diag(res) <- NA     
+  
+  
+  res <- res %>%
+    as_tibble() 
+  
+  colnames(res) <- items
+  
+  res$var <- items
+  
+  
+  
+  
+  ovr_table <- res %>% 
+    select(var, everything()) %>%
+    flextable() %>%
+    bg(j = 2:ncol(res), 
+       bg = function(x){
+         out <- rep("transparent", length(x))
+         out[as.numeric(str_sub(x,1,4)) < 0] <- "#e76f51"
+         out[as.numeric(str_sub(x,1,4)) >= 0 & as.numeric(str_sub(x,1,4)) < 0.2] <- "#f4a261"
+         out[as.numeric(str_sub(x,1,4)) >= 0.2 & as.numeric(str_sub(x,1,4)) < 0.4] <- "#e9c46a"
+         out[as.numeric(str_sub(x,1,4)) >= 0.4 & as.numeric(str_sub(x,1,4)) < 0.6] <- "#2a9d8f"
+         out[as.numeric(str_sub(x,1,4)) >= 0.6 ] <- "#264653"
+         out
+       })
+  
+  FitFlextableToPage(ovr_table) %>%
+    add_footer_lines("*** significant at 0.1% level. 
+                   ** significant at 1% level. 
+                   * significant at 5% level.  
+                   + significant at 10% level.  ") %>%
+    set_table_properties(layout = "autofit")
+  
+  
+}
+
+
+  cor_fun(items_list)
+  
+  
+  
+}
+
+
+```
